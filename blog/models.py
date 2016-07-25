@@ -163,13 +163,22 @@ class BlogCategory(models.Model):
         return super(BlogCategory, self).save(*args, **kwargs)
 
 
-class BlogCategoryBlogPage(models.Model):
+class BlogCategoryBase(models.Model):
+    # Override _blog_model attribute to set a new blog
+    _blog_model = 'BlogPage'
     category = models.ForeignKey(
         BlogCategory, related_name="+", verbose_name=_('Category'))
-    page = ParentalKey('BlogPage', related_name='categories')
+    page = ParentalKey(_blog_model, related_name='categories')
     panels = [
         FieldPanel('category'),
     ]
+
+    class Meta:
+        abstract = True
+
+
+class BlogCategoryBlogPage(BlogCategoryBase):
+    pass
 
 
 class BlogPageTag(TaggedItemBase):
@@ -211,11 +220,8 @@ class BlogPageBase(Page):
         limit_choices_to=limit_author_choices,
         verbose_name=_('Author'),
         on_delete=models.SET_NULL,
-        related_name='author_pages',
     )
     tags = ClusterTaggableManager(through=BlogPageTag, blank=True)
-    blog_categories = models.ManyToManyField(
-        BlogCategory, through=BlogCategoryBlogPage, blank=True)
 
     class Meta:
         abstract = True
@@ -243,6 +249,8 @@ class BlogPageBase(Page):
 
 
 class BlogPage(BlogPageBase):
+    blog_categories = models.ManyToManyField(
+        BlogCategory, through=BlogCategoryBlogPage, blank=True)
     body = RichTextField(verbose_name=_('body'), blank=True)
     date = models.DateField(
         _("Post date"), default=datetime.datetime.today,

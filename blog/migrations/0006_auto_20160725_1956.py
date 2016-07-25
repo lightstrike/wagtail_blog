@@ -17,7 +17,7 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='blogpage',
             name='author',
-            field=models.ForeignKey(related_name='author_pages', on_delete=django.db.models.deletion.SET_NULL, blank=True, null=True, verbose_name='Author', to=settings.AUTH_USER_MODEL),
+            field=models.ForeignKey(blank=True, null=True, verbose_name='Author', to=settings.AUTH_USER_MODEL, on_delete=django.db.models.deletion.SET_NULL),
         ),
         migrations.AlterField(
             model_name='blogpage',
