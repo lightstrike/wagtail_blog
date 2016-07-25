@@ -9,6 +9,7 @@ from django.template.defaultfilters import slugify
 from django.utils.translation import ugettext_lazy as _
 from wagtail.wagtailcore.fields import RichTextField
 from wagtail.wagtailcore.models import Page
+from wagtail.wagtailcore.utils import resolve_model_string
 from wagtail.wagtailadmin.edit_handlers import (
     FieldPanel, InlinePanel, MultiFieldPanel, FieldRowPanel)
 from wagtail.wagtailimages.edit_handlers import ImageChooserPanel
@@ -40,11 +41,12 @@ def get_blog_context(context):
     return context
 
 
-class BlogIndexPage(Page):
+class BlogIndexBase(Page):
     @property
     def blogs(self):
         # Get list of blog pages that are descendants of this page
-        blogs = BlogPage.objects.descendant_of(self).live()
+        blog_model = resolve_model_string(self._blog_model)
+        blogs = blog_model.objects.descendant_of(self).live()
         blogs = blogs.order_by(
             '-date'
         ).select_related('owner').prefetch_related(
@@ -56,7 +58,7 @@ class BlogIndexPage(Page):
 
     def get_context(self, request, tag=None, category=None, author=None, *args,
                     **kwargs):
-        context = super(BlogIndexPage, self).get_context(
+        context = super(BlogIndexBase, self).get_context(
             request, *args, **kwargs)
         blogs = self.blogs
 
@@ -103,8 +105,16 @@ class BlogIndexPage(Page):
         return context
 
     class Meta:
+        abstract = True
+
+
+class BlogIndexPage(BlogIndexBase):
+    _blog_model = 'blog.BlogPage'
+
+    class Meta:
         verbose_name = _('Blog index')
-    subpage_types = ['blog.BlogPage']
+
+    subpage_types = [_blog_model]
 
 
 @register_snippet
@@ -189,9 +199,51 @@ def limit_author_choices():
     return limit
 
 
-class BlogPage(Page):
-    body = RichTextField(verbose_name=_('body'), blank=True)
+class BlogPageBase(Page):
+    """
+    BlogPageBase provides the foundation to create more complex blog
+    page types, particularly for replacing the RichTextField in BlogPage
+    with StreamField blocks.
+    """
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        blank=True, null=True,
+        limit_choices_to=limit_author_choices,
+        verbose_name=_('Author'),
+        on_delete=models.SET_NULL,
+        related_name='author_pages',
+    )
     tags = ClusterTaggableManager(through=BlogPageTag, blank=True)
+    blog_categories = models.ManyToManyField(
+        BlogCategory, through=BlogCategoryBlogPage, blank=True)
+
+    class Meta:
+        abstract = True
+
+    parent_page_types = ['blog.BlogIndexPage']
+
+    def save_revision(self, *args, **kwargs):
+        if not self.author:
+            self.author = self.owner
+        return super(BlogPageBase, self).save_revision(*args, **kwargs)
+
+    def get_absolute_url(self):
+        return self.url
+
+    def get_blog_index(self):
+        # Find closest ancestor which is a blog index
+        return self.get_ancestors().type(BlogIndexPage).last()
+
+    def get_context(self, request, *args, **kwargs):
+        context = super(BlogPageBase, self).get_context(request, *args, **kwargs)
+        context['blogs'] = self.get_blog_index().blogindexpage.blogs
+        context = get_blog_context(context)
+        context['COMMENTS_APP'] = COMMENTS_APP
+        return context
+
+
+class BlogPage(BlogPageBase):
+    body = RichTextField(verbose_name=_('body'), blank=True)
     date = models.DateField(
         _("Post date"), default=datetime.datetime.today,
         help_text=_("This date may be displayed on the blog post. It is not "
@@ -205,20 +257,10 @@ class BlogPage(Page):
         related_name='+',
         verbose_name=_('Header image')
     )
-    author = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        blank=True, null=True,
-        limit_choices_to=limit_author_choices,
-        verbose_name=_('Author'),
-        on_delete=models.SET_NULL,
-        related_name='author_pages',
-    )
 
     search_fields = Page.search_fields + (
         index.SearchField('body'),
     )
-    blog_categories = models.ManyToManyField(
-        BlogCategory, through=BlogCategoryBlogPage, blank=True)
 
     settings_panels = [
         MultiFieldPanel([
@@ -231,30 +273,9 @@ class BlogPage(Page):
         FieldPanel('author'),
     ]
 
-    def save_revision(self, *args, **kwargs):
-        if not self.author:
-            self.author = self.owner
-        return super(BlogPage, self).save_revision(*args, **kwargs)
-
-    def get_absolute_url(self):
-        return self.url
-
-    def get_blog_index(self):
-        # Find closest ancestor which is a blog index
-        return self.get_ancestors().type(BlogIndexPage).last()
-
-    def get_context(self, request, *args, **kwargs):
-        context = super(BlogPage, self).get_context(request, *args, **kwargs)
-        context['blogs'] = self.get_blog_index().blogindexpage.blogs
-        context = get_blog_context(context)
-        context['COMMENTS_APP'] = COMMENTS_APP
-        return context
-
     class Meta:
         verbose_name = _('Blog page')
         verbose_name_plural = _('Blog pages')
-
-    parent_page_types = ['blog.BlogIndexPage']
 
 
 BlogPage.content_panels = [
